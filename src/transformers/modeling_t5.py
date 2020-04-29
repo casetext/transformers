@@ -426,19 +426,17 @@ class T5Block(nn.Module):
         head_mask=None,
     ):
         if self.device is not None:
-            (hidden_states,
+            inputs = [hidden_states,
             attention_mask,
             position_bias,
             encoder_hidden_states,
             encoder_attention_mask,
             encoder_decoder_position_bias,
-            head_mask) = tuple(t.to(self.device) for t in (hidden_states,
-            attention_mask,
-            position_bias,
-            encoder_hidden_states,
-            encoder_attention_mask,
-            encoder_decoder_position_bias,
-            head_mask))  # Model parallelism
+            head_mask]
+
+            for i in inputs:
+                if i is not None:
+                    i = i.to(self.device)  # Model parallelism
 
         self_attention_outputs = self.layer[0](
             hidden_states, attention_mask=attention_mask, position_bias=position_bias, head_mask=head_mask
@@ -813,7 +811,7 @@ class T5Model(T5PreTrainedModel):
             self.to(devices[0] if devices else None)
             return
 
-        modules_to_move = set(self.modules)
+        modules_to_move = set(self.modules())
 
         # Evenly spread the blocks on devices
         block_list = self.get_block_list()
@@ -830,7 +828,7 @@ class T5Model(T5PreTrainedModel):
             modules_to_move.remove(block)
 
         # Take care of brining back the tensors to the first device at the end of the last block's forward
-        block.next_device = device[0]
+        block.next_device = devices[0]
         # block.register_forward_hook(lambda module, input, output: tuple(t.to(device[0]) for t in output))
 
         # Move the remaining modules (embeddings) on the first device
