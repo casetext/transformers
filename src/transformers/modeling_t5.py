@@ -463,7 +463,7 @@ class T5Block(nn.Module):
         outputs = (hidden_states,) + outputs  # add attentions if we output them
 
         if self.next_device is not None:
-            outputs = tuple(t.to(self.device) for t in outputs)  # Model parallelism
+            outputs = tuple(t.to(self.next_device) for t in outputs)  # Model parallelism
 
         return outputs  # hidden-states, (self-attention weights), (self-attention position bias), (cross-attention weights), (cross-attention position bias)
 
