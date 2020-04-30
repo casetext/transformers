@@ -917,20 +917,10 @@ class T5Model(T5PreTrainedModel):
 
 
 @add_start_docstrings("""T5 Model with a `language modeling` head on top. """, T5_START_DOCSTRING)
-class T5ForConditionalGeneration(T5PreTrainedModel):
+class T5ForConditionalGeneration(T5Model):
     def __init__(self, config):
         super().__init__(config)
         self.model_dim = config.d_model
-
-        self.shared = nn.Embedding(config.vocab_size, config.d_model)
-
-        encoder_config = copy.deepcopy(config)
-        self.encoder = T5Stack(encoder_config, self.shared)
-
-        decoder_config = copy.deepcopy(config)
-        decoder_config.is_decoder = True
-        self.decoder = T5Stack(decoder_config, self.shared)
-
         self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
 
         self.init_weights()
