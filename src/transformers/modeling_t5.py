@@ -33,6 +33,7 @@ from .modeling_utils import PreTrainedModel, prune_linear_layer
 
 
 logger = logging.getLogger(__name__)
+import ipdb
 
 ####################################################
 # This dict contrains shortcut names and associated url
@@ -132,6 +133,62 @@ def load_tf_weights_in_t5(model, config, tf_checkpoint_path):
     logger.info("Weights not copied to PyTorch model: {}".format(", ".join(tf_weights.keys())))
     # logger.info("Weights not copied to PyTorch model: {}".format(', '.join(tf_weights.keys())))
     return model
+
+
+
+####################################################
+# Helper function to spread Models on several gpus
+# 
+####################################################
+
+def _spread_on_devices(_model, devices: Optional[List] = None):
+    """ Spread a transformers model on several devices by moving block on several devices (simple model parallelism)
+
+        The blocks of the transformers are spread among the given device list
+        or on all visible CUDA devices if no device list is given.
+
+        The first device will host in addition the embeddings and the input/output tensors.
+
+    """
+    if devices is None and torch.cuda.is_available():
+        devices = list(range(torch.cuda.device_count()))
+    if len(devices) < 2:
+        _model.to(devices[0] if devices else None)
+        return
+
+    modules_to_move = set(_model.modules())
+
+    # Evenly spread the blocks on devices
+    block_list = _model.get_block_list()
+    group_size = len(block_list) // len(devices)
+    for i, block in enumerate(block_list):
+        device = devices[i // group_size]
+        # Note that we cannot easily use `forward_pre_hook` to move tensors around since this type of hooks currently
+        # only act on the positional arguments send to the forward pass (PyTorch 1.4.0).
+        # So you should call your model's forward pass with tensors as positional arguments
+        # see: https://github.com/pytorch/pytorch/blob/master/torch/nn/modules/module.py#L548-L554
+        # block.register_forward_pre_hook(lambda module, input: tuple(t.to(device) for t in input))
+        block.to(device)
+        block.device = device
+        modules_to_move.remove(block)
+        modules_to_move-=set(block.modules())
+
+    # Take care of brining back the tensors to the first device at the end of the last block's forward
+    block.next_device = devices[0]
+    # block.register_forward_hook(lambda module, input, output: tuple(t.to(device[0]) for t in output))
+
+    # Move the remaining modules (embeddings) on the first device
+    spurious_modules = [v for k,v in  _model.named_modules() if 'block' not in k and k]
+    for module in spurious_modules:
+        module.to(devices[0])
+        modules_to_move.remove(module)
+    assert any([str(v[1].device)!='cpu' for v in _model.named_parameters()])
+
+
+
+
+
+
 
 
 ####################################################
@@ -426,7 +483,8 @@ class T5Block(nn.Module):
         head_mask=None,
     ):
         if self.device is not None:
-            inputs = [hidden_states,
+            """
+            hidden_states,
             attention_mask,
             position_bias,
             encoder_hidden_states,
@@ -437,6 +495,18 @@ class T5Block(nn.Module):
             for i in inputs:
                 if i is not None:
                     i = i.to(self.device)  # Model parallelism
+
+            """
+            hidden_states = hidden_states.to(self.device)
+            attention_mask = None if attention_mask == None else attention_mask.to(self.device)
+            position_bias = None if position_bias == None else position_bias.to(self.device)
+            encoder_hidden_states = None if encoder_hidden_states == None else encoder_hidden_states.to(self.device)
+            encoder_attention_mask = None if encoder_attention_mask == None else encoder_attention_mask.to(self.device)
+            encoder_decoder_position_bias = None if encoder_decoder_position_bias == None else encoder_decoder_position_bias.to(self.device)
+
+
+        #ipdb.set_trace()
+        #print(self.__class__.__name__,self.device,hidden_states.device)
 
         self_attention_outputs = self.layer[0](
             hidden_states, attention_mask=attention_mask, position_bias=position_bias, head_mask=head_mask
@@ -561,6 +631,10 @@ class T5Stack(T5PreTrainedModel):
 
         self.init_weights()
 
+    
+    def spread_on_devices(self, devices: Optional[List] = None):
+        _spread_on_devices(self, devices = devices)
+    
     def get_block_list(self):
         return list(self.block)
 
@@ -797,43 +871,8 @@ class T5Model(T5PreTrainedModel):
         self.init_weights()
 
     def spread_on_devices(self, devices: Optional[List] = None):
-        """ Spread a transformers model on several devices by moving block on several devices (simple model parallelism)
+        _spread_on_devices(self, devices = devices)
 
-            The blocks of the transformers are spread among the given device list
-            or on all visible CUDA devices if no device list is given.
-
-            The first device will host in addition the embeddings and the input/output tensors.
-
-        """
-        if devices is None and torch.cuda.is_available():
-            devices = list(range(torch.cuda.device_count()))
-        if len(devices) < 2:
-            self.to(devices[0] if devices else None)
-            return
-
-        modules_to_move = set(self.modules())
-
-        # Evenly spread the blocks on devices
-        block_list = self.get_block_list()
-        group_size = len(block_list) // len(devices)
-        for i, block in enumerate(block_list):
-            device = devices[i // group_size]
-            # Note that we cannot easily use `forward_pre_hook` to move tensors around since this type of hooks currently
-            # only act on the positional arguments send to the forward pass (PyTorch 1.4.0).
-            # So you should call your model's forward pass with tensors as positional arguments
-            # see: https://github.com/pytorch/pytorch/blob/master/torch/nn/modules/module.py#L548-L554
-            # block.register_forward_pre_hook(lambda module, input: tuple(t.to(device) for t in input))
-            block.to(device)
-            block.device = device
-            modules_to_move.remove(block)
-
-        # Take care of brining back the tensors to the first device at the end of the last block's forward
-        block.next_device = devices[0]
-        # block.register_forward_hook(lambda module, input, output: tuple(t.to(device[0]) for t in output))
-
-        # Move the remaining modules (embeddings) on the first device
-        for module in list(modules_to_move):
-            module.to(devices[0])
 
     def get_block_list(self):
         return list(self.encoder.get_block_list()) + list(self.decoder.get_block_list())
