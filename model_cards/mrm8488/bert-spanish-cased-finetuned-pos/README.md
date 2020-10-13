@@ -1,5 +1,5 @@
 ---
-language: spanish
+language: es
 thumbnail: https://i.imgur.com/jgBdimh.png
 ---
 
@@ -19,7 +19,7 @@ I preprocessed the dataset and splitted it as train / dev (80/20)
 | Dev                    | 50 K |
 
 
-- [Fine-tune on NER script provided by Huggingface](https://github.com/huggingface/transformers/blob/master/examples/run_ner.py)
+- [Fine-tune on NER script provided by Huggingface](https://github.com/huggingface/transformers/blob/master/examples/token-classification/run_ner.py)
 
 - **60** Labels covered:
 

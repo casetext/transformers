@@ -16,7 +16,6 @@
 
 
 import argparse
-import logging
 import os
 from pathlib import Path
 
@@ -32,6 +31,7 @@ from transformers import (
     BartTokenizer,
 )
 from transformers.modeling_bart import _make_linear_from_emb
+from transformers.utils import logging
 
 
 FAIRSEQ_MODELS = ["bart.large", "bart.large.mnli", "bart.large.cnn", "bart_xsum/model.pt"]
@@ -40,18 +40,29 @@ if version.parse(fairseq.__version__) < version.parse("0.9.0"):
     raise Exception("requires fairseq >= 0.9.0")
 
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logging.set_verbosity_info()
+logger = logging.get_logger(__name__)
 
 SAMPLE_TEXT = " Hello world! cécé herlolip"
 
-rename_keys = [
+mnli_rename_keys = [
     ("model.classification_heads.mnli.dense.weight", "classification_head.dense.weight"),
     ("model.classification_heads.mnli.dense.bias", "classification_head.dense.bias"),
     ("model.classification_heads.mnli.out_proj.weight", "classification_head.out_proj.weight"),
     ("model.classification_heads.mnli.out_proj.bias", "classification_head.out_proj.bias"),
 ]
-IGNORE_KEYS = ["encoder.version", "decoder.version", "model.encoder.version", "model.decoder.version", "_float_tensor"]
+
+
+def remove_ignore_keys_(state_dict):
+    ignore_keys = [
+        "encoder.version",
+        "decoder.version",
+        "model.encoder.version",
+        "model.decoder.version",
+        "_float_tensor",
+    ]
+    for k in ignore_keys:
+        state_dict.pop(k, None)
 
 
 def rename_key(dct, old, new):
@@ -89,7 +100,7 @@ def convert_bart_checkpoint(checkpoint_path, pytorch_dump_folder_path, hf_checkp
         state_dict = bart.state_dict()
         remove_ignore_keys_(state_dict)
         state_dict["model.shared.weight"] = state_dict["model.decoder.embed_tokens.weight"]
-        for src, dest in rename_keys:
+        for src, dest in mnli_rename_keys:
             rename_key(state_dict, src, dest)
         model = BartForSequenceClassification(config).eval()
         model.load_state_dict(state_dict)
@@ -100,7 +111,7 @@ def convert_bart_checkpoint(checkpoint_path, pytorch_dump_folder_path, hf_checkp
         remove_ignore_keys_(state_dict)
         state_dict["shared.weight"] = state_dict["decoder.embed_tokens.weight"]
         fairseq_output = bart.extract_features(tokens)
-        if hf_checkpoint_name == "bart-large":
+        if hf_checkpoint_name == "facebook/bart-large":
             model = BartModel(config).eval()
             model.load_state_dict(state_dict)
             new_model_outputs = model(tokens).model[0]
@@ -116,11 +127,6 @@ def convert_bart_checkpoint(checkpoint_path, pytorch_dump_folder_path, hf_checkp
     assert (fairseq_output == new_model_outputs).all().item()
     Path(pytorch_dump_folder_path).mkdir(exist_ok=True)
     model.save_pretrained(pytorch_dump_folder_path)
-
-
-def remove_ignore_keys_(state_dict):
-    for k in IGNORE_KEYS:
-        state_dict.pop(k, None)
 
 
 if __name__ == "__main__":

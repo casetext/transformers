@@ -18,7 +18,7 @@ import json
 import os
 import unittest
 
-from transformers.tokenization_openai import VOCAB_FILES_NAMES, OpenAIGPTTokenizer
+from transformers.tokenization_openai import VOCAB_FILES_NAMES, OpenAIGPTTokenizer, OpenAIGPTTokenizerFast
 
 from .test_tokenization_common import TokenizerTesterMixin
 
@@ -26,6 +26,8 @@ from .test_tokenization_common import TokenizerTesterMixin
 class OpenAIGPTTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
 
     tokenizer_class = OpenAIGPTTokenizer
+    rust_tokenizer_class = OpenAIGPTTokenizerFast
+    test_rust_tokenizer = True
 
     def setUp(self):
         super().setUp()
@@ -64,13 +66,8 @@ class OpenAIGPTTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         with open(self.merges_file, "w") as fp:
             fp.write("\n".join(merges))
 
-    def get_tokenizer(self, **kwargs):
-        return OpenAIGPTTokenizer.from_pretrained(self.tmpdirname, **kwargs)
-
-    def get_input_output_texts(self):
-        input_text = "lower newer"
-        output_text = "lower newer"
-        return input_text, output_text
+    def get_input_output_texts(self, tokenizer):
+        return "lower newer", "lower newer"
 
     def test_full_tokenizer(self):
         tokenizer = OpenAIGPTTokenizer(self.vocab_file, self.merges_file)
